@@ -101,3 +101,38 @@ app.post('/responder/:id', upload.single('imagen'), (req, res) => {
 app.listen(PORT, () => {
   console.log('Foro corriendo en http://localhost:3000');
 });
+const express = require('express');
+const app = express();
+const puerto = process.env.PORT || 3000;
+
+// Si usas archivos estáticos, déjalos también
+app.use(express.static('public'));
+
+// Página principal
+app.get('/', (req, res) => {
+    res.send(`
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tu Foro</title>
+
+    <!-- ✅ Tu código de verificación de Google -->
+    <meta name="google-site-verification" content="b1PiY1HS_ISl0nhOTIAkygKDnk11S29DmtYqltF-APU" />
+
+</head>
+<body>
+
+    <!-- Aquí va TODO tu contenido, formularios, mensajes, etc. -->
+    <h1>Bienvenido a mi foro</h1>
+
+</body>
+</html>
+    `);
+});
+
+app.listen(puerto, () => {
+    console.log(`Servidor corriendo en el puerto ${puerto}`);
+});
+
