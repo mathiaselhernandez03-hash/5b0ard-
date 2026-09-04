@@ -44,7 +44,7 @@ function PaginaHTML(contenido) {
 }
 
 // ---------- PÁGINA DE BIENVENIDA ----------
-app.get('/', (req, res) => {
+app.get`(`/`, (req, res) => {
   res.send(`
     <html>
     <head>
