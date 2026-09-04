@@ -1,6 +1,6 @@
 const express = require('express');
 const multer = require('multer');
-const { DatabaseSync } = require('sqlite');
+const { DatabaseSync } = require('node:sqlite');
 
 const app = express();
 const PORT = 3000;
@@ -112,7 +112,7 @@ app.get('/b/', (req, res) => {
 
 app.post('/crear-hilo', upload.single('imagen'), (req, res) => {
   if (!req.file) return res.send('Error: sube una imagen');
-  const user = req.body.password === 'matt2026' ? 'just matt' : 'Anonimo';
+  const user = req.body.password === 'soymathias' ? 'just matt' : 'Anonimo';
   db.prepare('INSERT INTO hilos (titulo, comentario, imagen, username) VALUES (?, ?, ?, ?)')
     .run(req.body.titulo || null, req.body.comentario, req.file.filename, user);
   res.redirect('/b/');
@@ -160,7 +160,7 @@ app.get('/hilo/:id', (req, res) => {
 
 app.post('/responder/:id', upload.single('imagen'), (req, res) => {
   const img = req.file ? req.file.filename : null;
-  const user = req.body.password === 'matt2026' ? 'just matt' : 'Anonimo';
+  const user = req.body.password === 'soymathias' ? 'just matt' : 'Anonimo';
   db.prepare('INSERT INTO respuestas (hilo_id, comentario, imagen, username) VALUES (?, ?, ?, ?)')
     .run(req.params.id, req.body.comentario, img, user);
   res.redirect(`/hilo/${req.params.id}`);
