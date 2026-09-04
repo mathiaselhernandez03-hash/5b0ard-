@@ -36,7 +36,8 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static('uploads'));
 
 function PaginaHTML(contenido) {
-  return '<html><head><meta charset="utf-8"><title>5b0ard</title></head><body style="background:#fffff0; font-family:sans-serif; margin:0; padding:0;"><div style="background:#1d2f6f; padding:8px 10px;"><a href="/" style="color:#fff; text-decoration:none; font-weight:bold; margin-right:15px;">5b0ard</a><a href="/b" style="color:#fff; text-decoration:none;">/b/ - Random</a></div>' + contenido + '</body></html>';
+  return '<html><head><meta charset="utf-8"<meta name="google-site-verification" content="b1PiY1HS_ISl0nhOTIAkygKDnk11S29DmtYqltF-APU" />
+><title>5b0ard</title></head><body style="background:#fffff0; font-family:sans-serif; margin:0; padding:0;"><div style="background:#1d2f6f; padding:8px 10px;"><a href="/" style="color:#fff; text-decoration:none; font-weight:bold; margin-right:15px;">5b0ard</a><a href="/b" style="color:#fff; text-decoration:none;">/b/ - Random</a></div>' + contenido + '</body></html>';
 }
 
 app.get('/', (req, res) => {
