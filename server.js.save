@@ -1,0 +1,176 @@
+const express = require('express');
+const { DatabaseSync } = require('node:sqlite');
+const multer = require('multer');
+const path = require('path');
+
+const app = express();
+const PORT = 3000;
+
+const db = new DatabaseSync('./4chan_clon.db');
+
+db.exec(`CREATE TABLE IF NOT EXISTS hilos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    titulo TEXT,
+    comentario TEXT,
+    imagen TEXT,
+    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS respuestas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    hil;
+
+const storage = multer.diskStorage({
+  destination: 'uploads/',
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + '-' + file.originalname);
+  }
+});
+const upload = multer({ storage });
+
+app.use(express.urlencoded({ extended: true }));
+app.use('/uploads', express.static('uploads'));
+
+// ---------- PLANTILLA BASE (usada por /b/ y por los hilos) ----------
+function PaginaHTML(contenido) {
+  return `
+  <html>
+  <head><meta charset="utf-8"><title>5b0ard</title></head>
+  <body style="background:#fffff0; font-family:sans-serif;">
+    <div style="background:#1d2f6f; padding:8px 10px;">
+      <a href="/" style="color:#fff; text-decoration:none; font-weight:bold; margin-right:15px;">5b0ard</a>
+      <a href="/b" style="color:#fff; text-decoration:none;">/b/ - Random</a>
+    </div>
+    ${contenido}
+  </body>
+  </html>`;
+}
+
+// ---------- PÁGINA DE BIENVENIDA ----------
+app.get('/', (req, res) => {
+  res.send(`
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>5b0ard</title>
+    </head>
+    <body style="background:#1d2f6f; font-family:sans-serif; color:#fff; text-align:center; padding-top:60px;">
+
+      <h1 style="font-size:48px; margin-bottom:0;">5b0ard</h1>
+      <p style="color:#ccc; font-size:16px;">Un tablón anónimo simple y directo. / A simple, direct anonymous board.</p>
+
+      <div style="max-width:400px; margin:40px auto; background:#f0e0d6; color:#800; padding:20px; border-radius:6px;">
+        <h2 style="margin-top:0;">Bienvenido / Welcome</h2>
+
+        <p style="color:#333; margin-bottom:6px;">
+          <b>ES:</b> Aquí todo se vale. Socializa de lo que quieras, di lo que quieras.
+          No te tomes nada en serio — si lo haces, eres un imbécil.
+        </p>
+
+        <p style="color:#333;">
+          <b>EN:</b> Anything goes here. Talk about whatever you want, say whatever you want.
+          Don't take anything seriously — if you do, you're an idiot.
+        </p>
+
+        <a href="/b" style="display:inline-block; margin-top:10px; background:#1d2f6f; color:#fff; text-decoration:none; padding:10px 20px; border-radius:4px;">
+          Entrar a /b/ - Random
+        </a>
+      </div>
+
+    </body>
+    </html>
+  `);
+});
+
+// ---------- TABLÓN /b/ (lista de hilos) ----------
+app.get('/b', (req, res) => {
+  const hilos = db.prepare('SELECT * FROM hilos ORDER BY id DESC').all();
+
+  let hilosHTML = '';
+  if (hilos.length === 0) {
+    hilosHTML = '<p style="color:red; text-align:center;">No hay hilos activos. ¡Sé el primero!</p>';
+  } else {
+    hilos.forEach(h => {
+      hilosHTML += `
+      <div style="border:1px solid #ccc; margin:10px 0; padding:10px; background:#f0e0d6;">
+        <span class="meta">Anónimo ${h.titulo ? '- ' + h.titulo : ''} (${h.fecha || ''}) <span class="num">No. ${h.id}</span></span><br><br>
+        ${h.imagen ? `<a href="/uploads/${h.imagen}" target="_blank"><img src="/uploads/${h.imagen}" style="max-width:200px; float:left; margin-right:10px;"></a>` : ''}
+        <p>${h.comentario}</p>
+        <div style="clear:both;"></div>
+        <a href="/hilo/${h.id}" style="font-size:13px;">Ver hilo / responder</a>
+      </div>`;
+    });
+  }
+
+  const formulario = `
+    <div style="max-width:400px; margin:20px auto; background:#e0e0f0; padding:15px;">
+      <h2 style="text-align:center; background:#f0d6d0; padding:10px; margin-top:0;">/b/ - Tablón Anónimo</h2>
+      <form method="POST" action="/crear-hilo" enctype="multipart/form-data">
+        <input type="text" name="titulo" placeholder="Título (Opcional)" style="width:100%; margin-bottom:5px; box-sizing:border-box;"><br>
+        <textarea name="comentario" placeholder="Comentario..." rows="5" style="width:100%; margin-bottom:5px; box-sizing:border-box;"></textarea><br>
+        <input type="file" name="imagen"><br><br>
+        <button type="submit" style="width:100%;">Publicar Hilo</button>
+      </form>
+    </div>
+    <div style="max-width:500px; margin:0 auto;">${hilosHTML}</div>
+  `;
+
+  res.send(PaginaHTML(formulario));
+});
+
+// ---------- CREAR HILO ----------
+app.post('/crear-hilo', upload.single('imagen'), (req, res) => {
+  if (!req.file) return res.send('Error: Es obligatorio subir una imagen.');
+  db.prepare(`INSERT INTO hilos (titulo, comentario, imagen) VALUES (?, ?, ?)`)
+    .run(req.body.titulo, req.body.comentario, req.file.filename);
+  res.redirect('/b');
+});
+
+// ---------- VER UN HILO Y SUS RESPUESTAS ----------
+app.get('/hilo/:id', (req, res) => {
+  const hilo = db.prepare('SELECT * FROM hilos WHERE id = ?').get(req.params.id);
+  if (!hilo) return res.send('Hilo no encontrado.');
+
+  const resps = db.prepare('SELECT * FROM respuestas WHERE hilo_id = ? ORDER BY id ASC').all(req.params.id);
+
+  let hiloHTML = `
+    <div style="max-width:500px; margin:20px auto;">
+      <div class="hilo" style="border:1px solid #ccc; margin:10px 0; padding:10px; background:#f0e0d6;">
+        <span class="meta">Anónimo ${hilo.titulo ? '- ' + hilo.titulo : ''} (${hilo.fecha || ''}) <span class="num">No. ${hilo.id}</span></span><br><br>
+        ${hilo.imagen ? `<a href="/uploads/${hilo.imagen}" target="_blank"><img src="/uploads/${hilo.imagen}" style="max-width:200px; float:left; margin-right:10px;"></a>` : ''}
+        <p>${hilo.comentario}</p>
+        <div style="clear:both;"></div>
+      </div>`;
+
+  resps.forEach(r => {
+    hiloHTML += `
+      <div class="respuesta" style="border:1px solid #ddd; margin:8px 0 8px 20px; padding:10px; background:#f9f9f9;">
+        <span class="meta">Anónimo (${r.fecha || ''}) <span class="num">No. ${r.id}</span></span><br><br>
+        ${r.imagen ? `<a href="/uploads/${r.imagen}" target="_blank"><img src="/uploads/${r.imagen}" style="max-width:150px; float:left; margin-right:10px;"></a>` : ''}
+        <p>${r.comentario}</p>
+        <div style="clear:both;"></div>
+      </div>`;
+  });
+
+  hiloHTML += `
+      <div style="background:#e0e0f0; padding:15px; margin-top:10px;">
+        <form method="POST" action="/responder/${hilo.id}" enctype="multipart/form-data">
+          <textarea name="comentario" placeholder="Comentario..." rows="4" style="width:100%; margin-bottom:5px; box-sizing:border-box;"></textarea><br>
+          <input type="file" name="imagen"><br><br>
+          <button type="submit" style="width:100%;">Responder</button>
+        </form>
+      </div>
+    </div>`;
+
+  res.send(PaginaHTML(hiloHTML));
+});
+
+// ---------- RESPONDER A UN HILO ----------
+app.post('/responder/:id', upload.single('imagen'), (req, res) => {
+  const imagenNom = req.file ? req.file.filename : null;
+  db.prepare(`INSERT INTO respuestas (hilo_id, comentario, imagen) VALUES (?, ?, ?)`)
+    .run(req.params.id, req.body.comentario, imagenNom);
+  res.redirect('/hilo/' + req.params.id);
+});
+
+app.listen(PORT, () => console.log(`Foro corriendo en http://localhost:${PORT}`));
+
