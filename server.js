@@ -1,174 +1,210 @@
 const express = require('express');
 const multer = require('multer');
-const { DatabaseSync } = require('node:sqlite');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
-const db = new DatabaseSync('./4chan_clon.db');
+// Carpeta para guardar datos
+const DATA_DIR = './datos';
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
 
-db.exec(`CREATE TABLE IF NOT EXISTS hilos (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  titulo TEXT,
-  comentario TEXT,
-  imagen TEXT,
-  username TEXT DEFAULT 'Anonimo',
-  fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-)`);
-
-db.exec(`CREATE TABLE IF NOT EXISTS respuestas (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  hilo_id INTEGER,
-  comentario TEXT,
-  imagen TEXT,
-  username TEXT DEFAULT 'Anonimo',
-  fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-)`);
-
+// Configuración multer para imágenes
 const storage = multer.diskStorage({
   destination: 'uploads/',
   filename: (req, file, cb) => {
     cb(null, Date.now() + '-' + file.originalname);
   }
 });
-
 const upload = multer({ storage });
 
+// Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static('uploads'));
 app.use(express.static('public'));
 
+// Funciones para guardar/cargar datos (archivos JSON en vez de SQLite)
+function leerArchivo(nombre) {
+  try {
+    const ruta = path.join(DATA_DIR, nombre);
+    if (!fs.existsSync(ruta)) return [];
+    return JSON.parse(fs.readFileSync(ruta, 'utf8'));
+  } catch { return []; }
+}
+function guardarArchivo(nombre, datos) {
+  fs.writeFileSync(path.join(DATA_DIR, nombre), JSON.stringify(datos, null, 2));
+}
+
+// Plantilla con logo y título Sonic
 function PaginaHTML(contenido) {
-  return `<!html>
+  return `<!DOCTYPE html>
+<html>
 <head>
 <meta charset="utf-8">
 <title>Sonic - Foro</title>
 </head>
-<body style="background:#fffff0; margin:0; font-family:sans-serif;">
+<body style="background:#000; color:#fff; margin:0; font-family:sans-serif;">
 
-<div style="text-align:center; padding:15px;">
-<img src="/logo.png" alt="Sonic" style="max-width:400px;">
+<div style="text-align:center; padding:20px;">
+<img src="/logo.png" alt="Sonic" style="max-width:300px;">
 </div>
 
-<div style="background:#1d2f6f; padding:8px 15px;">
-<a href="/" style="color:#fff; text-decoration:none; font-weight:bold; margin-right:15px;">Inicio</a>
-<a href="/b/" style="color:#fff; text-decoration:none;">/b/ - Random</a>
+<div style="background:#0066aa; padding:10px 20px; text-align:center;">
+<a href="/" style="color:#fff; text-decoration:none; margin:0 15px;">Inicio</a>
+<a href="/b/" style="color:#fff; text-decoration:none; margin:0 15px;">/b/ - Random</a>
 </div>
 
+<div style="max-width:900px; margin:20px auto; padding:0 15px;">
 ${contenido}
+</div>
 
 </body>
 </html>`;
 }
 
+// Página principal
 app.get('/', (req, res) => {
   res.send(PaginaHTML(`
-    <div style="padding:15px;">
-      <h1 style="text-align:center; color:#008800; font-size:40px;">Sonic</h1>
-      <p style="text-align:center; color:#555;">Bienvenido al foro</p>
-      <div style="text-align:center; margin-top:30px;">
-        <a href="/b/" style="background:#008800; color:#fff; padding:10px 20px; text-decoration:none; border-radius:4px;">Entrar a /b/</a>
-      </div>
+    <h1 style="text-align:center; color:#00ccff; font-size:48px;">SONIC FORO</h1>
+    <p style="text-align:center; font-size:18px; color:#aaa;">Todo se vale, socializa de lo que quieras</p>
+    <div style="text-align:center; margin-top:40px;">
+      <a href="/b/" style="background:#00ccff; color:#000; padding:12px 30px; text-decoration:none; font-weight:bold; border-radius:5px;">Entrar al foro</a>
     </div>
   `));
 });
 
+// Tablero /b/
 app.get('/b/', (req, res) => {
-  const hilos = db.prepare('SELECT * FROM hilos ORDER BY id DESC').all();
-  let hilosHTML = '';
+  const hilos = leerArchivo('hilos.json');
+  let html = '';
 
   if (hilos.length === 0) {
-    hilosHTML = `<p style="color:red; text-align:center; margin-top:40px;">No hay hilos aun. Se el primero!</p>`;
+    html = `<p style="text-align:center; color:#888; margin-top:50px;">No hay hilos todavía. ¡Sé el primero en publicar!</p>`;
   } else {
-    hilos.forEach(h => {
-      let imagen = h.imagen ? `<a href="/uploads/${h.imagen}" target="_blank"><img src="/uploads/${h.imagen}" style="max-width:150px;"></a>` : '';
-      hilosHTML += `
-        <div style="border:1px solid #ccc; margin:15px; padding:10px;">
-          <b>${h.username || 'Anonimo'}</b> - ${h.fecha || ''}
-          <h3>${h.titulo || 'Sin titulo'}</h3>
-          ${imagen}
-          <p>${h.comentario || ''}</p>
-          <a href="/hilo/${h.id}">Ver respuestas</a>
+    hilos.reverse().forEach(h => {
+      const img = h.imagen ? `<a href="/uploads/${h.imagen}" target="_blank"><img src="/uploads/${h.imagen}" style="max-width:180px; float:left; margin-right:15px; margin-bottom:10px;"></a>` : '';
+      html += `
+        <div style="border:1px solid #333; background:#111; padding:15px; margin:15px 0; overflow:auto;">
+          <strong>${h.username}</strong> - ${h.fecha}
+          <h3 style="color:#00ccff; margin:5px 0;">${h.titulo || 'Sin título'}</h3>
+          ${img}
+          <p style="margin-top:8px;">${h.comentario}</p>
+          <div style="clear:both;"></div>
+          <a href="/hilo/${h.id}" style="color:#00ccff;">Ver respuestas &rarr;</a>
         </div>
       `;
     });
   }
 
-  const form = `
-    <div style="max-width:400px; margin:20px auto; padding:15px; background:#eef;">
-      <h3 style="text-align:center;">Crear hilo</h3>
+  html += `
+    <div style="background:#1a1a1a; padding:20px; margin-top:30px; border-radius:8px;">
+      <h3 style="color:#00ccff; margin-top:0;">Crear nuevo hilo</h3>
       <form method="POST" action="/crear-hilo" enctype="multipart/form-data">
-        <input type="text" name="titulo" placeholder="Titulo" style="width:100%; margin-bottom:8px; padding:6px; box-sizing:border-box;"><br>
-        <textarea name="comentario" placeholder="Comentario" rows="4" style="width:100%; margin-bottom:8px; padding:6px; box-sizing:border-box;"></textarea><br>
-        <input type="password" name="password" placeholder="Contraseña" style="width:100%; margin-bottom:8px; padding:6px;"><br>
-        <input type="file" name="imagen" style="margin-bottom:8px;"><br>
-        <button type="submit" style="width:100%; padding:8px; background:#008800; color:#fff; border:none;">Publicar</button>
+        <input type="text" name="titulo" placeholder="Título (opcional)" style="width:100%; padding:10px; margin-bottom:10px; background:#222; border:1px solid #444; color:#fff; border-radius:4px;"><br>
+        <textarea name="comentario" placeholder="Tu comentario..." rows="4" style="width:100%; padding:10px; margin-bottom:10px; background:#222; border:1px solid #444; color:#fff; border-radius:4px;"></textarea><br>
+        <input type="password" name="password" placeholder="Contraseña (solo tú)" style="width:100%; padding:10px; margin-bottom:10px; background:#222; border:1px solid #444; color:#fff; border-radius:4px;"><br>
+        <input type="file" name="imagen" accept="image/*" style="margin-bottom:10px;"><br>
+        <button type="submit" style="background:#00ccff; color:#000; border:none; padding:10px 25px; font-weight:bold; border-radius:4px; cursor:pointer;">Publicar hilo</button>
       </form>
     </div>
   `;
 
-  res.send(PaginaHTML(hilosHTML + form));
+  res.send(PaginaHTML(html));
 });
 
+// Crear hilo
 app.post('/crear-hilo', upload.single('imagen'), (req, res) => {
-  if (!req.file) return res.send('Error: sube una imagen');
-  const user = req.body.password === 'soymathias' ? 'just matt' : 'Anonimo';
-  db.prepare('INSERT INTO hilos (titulo, comentario, imagen, username) VALUES (?, ?, ?, ?)')
-    .run(req.body.titulo || null, req.body.comentario, req.file.filename, user);
+  if (!req.file) return res.send(PaginaHTML('<p style="color:red;">Error: debes subir una imagen</p>'));
+  
+  const hilos = leerArchivo('hilos.json');
+  const username = req.body.password === 'matt2026' ? 'just matt' : 'Anónimo';
+  
+  const nuevo = {
+    id: hilos.length ? Math.max(...hilos.map(h => h.id)) + 1 : 1,
+    titulo: req.body.titulo || '',
+    comentario: req.body.comentario || '',
+    imagen: req.file.filename,
+    username,
+    fecha: new Date().toLocaleString('es-CO')
+  };
+  
+  hilos.push(nuevo);
+  guardarArchivo('hilos.json', hilos);
   res.redirect('/b/');
 });
 
+// Ver hilo
 app.get('/hilo/:id', (req, res) => {
-  const hilo = db.prepare('SELECT * FROM hilos WHERE id = ?').get(req.params.id);
-  if (!hilo) return res.send('Hilo no encontrado');
+  const hilos = leerArchivo('hilos.json');
+  const respuestas = leerArchivo(`respuestas_${req.params.id}.json`);
+  const hilo = hilos.find(h => h.id === parseInt(req.params.id));
+  
+  if (!hilo) return res.send(PaginaHTML('<p style="color:red;">Hilo no encontrado</p>'));
 
-  const respuestas = db.prepare('SELECT * FROM respuestas WHERE hilo_id = ? ORDER BY id ASC').all(req.params.id);
-
-  let hiloHTML = `
-    <div style="border:1px solid #ccc; margin:15px; padding:10px;">
-      <b>${h.username || 'Anonimo'}</b> - ${h.fecha || ''}
-      <h3>${h.titulo || 'Sin titulo'}</h3>
-      ${h.imagen ? `<img src="/uploads/${h.imagen}" style="max-width:200px;">` : ''}
-      <p>${h.comentario || ''}</p>
+  let html = `
+    <div style="border:1px solid #333; background:#111; padding:15px; margin:15px 0;">
+      <strong>${hilo.username}</strong> - ${hilo.fecha}
+      <h3 style="color:#00ccff;">${hilo.titulo || 'Sin título'}</h3>
+      ${hilo.imagen ? `<img src="/uploads/${hilo.imagen}" style="max-width:300px;">` : ''}
+      <p>${hilo.comentario}</p>
     </div>
+    <h3 style="color:#00ccff;">Respuestas</h3>
   `;
 
-  respuestas.forEach(r => {
-    hiloHTML += `
-      <div style="border:1px solid #ddd; margin:15px; padding:10px;">
-        <b>${r.username || 'Anonimo'}</b> - ${r.fecha || ''}
-        ${r.imagen ? `<img src="/uploads/${r.imagen}" style="max-width:150px;">` : ''}
-        <p>${r.comentario || ''}</p>
-      </div>
-    `;
-  });
+  if (respuestas.length === 0) {
+    html += `<p style="color:#888;">Sé el primero en responder</p>`;
+  } else {
+    respuestas.forEach(r => {
+      html += `
+        <div style="border:1px solid #222; background:#181818; padding:12px; margin:10px 0;">
+          <strong>${r.username}</strong> - ${r.fecha}
+          ${r.imagen ? `<img src="/uploads/${r.imagen}" style="max-width:200px;">` : ''}
+          <p>${r.comentario}</p>
+        </div>
+      `;
+    });
+  }
 
-  hiloHTML += `
-    <div style="max-width:400px; margin:20px auto; padding:15px; background:#eef;">
-      <h3>Responder</h3>
+  html += `
+    <div style="background:#1a1a1a; padding:20px; margin-top:20px; border-radius:8px;">
+      <h3 style="color:#00ccff; margin-top:0;">Responder</h3>
       <form method="POST" action="/responder/${hilo.id}" enctype="multipart/form-data">
-        <textarea name="comentario" placeholder="Tu respuesta" rows="3" style="width:100%; margin-bottom:8px; padding:6px;"></textarea><br>
-        <input type="password" name="password" placeholder="Contraseña" style="width:100%; margin-bottom:8px; padding:6px;"><br>
-        <input type="file" name="imagen" style="margin-bottom:8px;"><br>
-        <button type="submit" style="width:100%; padding:8px; background:#008800; color:#fff; border:none;">Responder</button>
+        <textarea name="comentario" placeholder="Tu respuesta..." rows="3" style="width:100%; padding:10px; margin-bottom:10px; background:#222; border:1px solid #444; color:#fff; border-radius:4px;"></textarea><br>
+        <input type="password" name="password" placeholder="Contraseña" style="width:100%; padding:10px; margin-bottom:10px; background:#222; border:1px solid #444; color:#fff; border-radius:4px;"><br>
+        <input type="file" name="imagen" accept="image/*" style="margin-bottom:10px;"><br>
+        <button type="submit" style="background:#00ccff; color:#000; border:none; padding:10px 25px; font-weight:bold; border-radius:4px; cursor:pointer;">Responder</button>
       </form>
     </div>
   `;
 
-  res.send(PaginaHTML(hiloHTML));
+  res.send(PaginaHTML(html));
 });
 
+// Responder
 app.post('/responder/:id', upload.single('imagen'), (req, res) => {
-  const img = req.file ? req.file.filename : null;
-  const user = req.body.password === 'soymathias' ? 'just matt' : 'Anonimo';
-  db.prepare('INSERT INTO respuestas (hilo_id, comentario, imagen, username) VALUES (?, ?, ?, ?)')
-    .run(req.params.id, req.body.comentario, img, user);
+  const respuestas = leerArchivo(`respuestas_${req.params.id}.json`);
+  const username = req.body.password === 'matt2026' ? 'just matt' : 'Anónimo';
+  
+  respuestas.push({
+    id: respuestas.length + 1,
+    comentario: req.body.comentario || '',
+    imagen: req.file ? req.file.filename : null,
+    username,
+    fecha: new Date().toLocaleString('es-CO')
+  });
+  
+  guardarArchivo(`respuestas_${req.params.id}.json`, respuestas);
   res.redirect(`/hilo/${req.params.id}`);
 });
 
-app.listen(PORT, () => {
-  console.log(`Servidor en http://localhost:${PORT}`);
-});
+// Crear carpetas necesarias
+if (!fs.existsSync('uploads')) fs.mkdirSync('uploads');
+if (!fs.existsSync('public')) fs.mkdirSync('public');
 
+// Iniciar servidor
+app.listen(PORT, () => {
+  console.log(`Servidor corriendo en el puerto ${PORT}`);
+});
 
 
