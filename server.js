@@ -101,9 +101,7 @@ app.post('/responder/:id', upload.single('imagen'), (req, res) => {
 app.listen(PORT, () => {
   console.log('Foro corriendo en http://localhost:3000');
 });
-const express = require('express');
-const app = express();
-const puerto = process.env.PORT || 3000;
+;
 
 // Si usas archivos estáticos, déjalos también
 app.use(express.static('public'));
@@ -130,9 +128,5 @@ app.get('/', (req, res) => {
 </body>
 </html>
     `);
-});
-
-app.listen(puerto, () => {
-    console.log(`Servidor corriendo en el puerto ${puerto}`);
 });
 
