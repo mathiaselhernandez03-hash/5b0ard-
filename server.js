@@ -66,6 +66,7 @@ const upload = multer({ storage });
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use('/uploads', express.static('uploads'));
+app.use('/public', express.static('public'));
 
 // ---------- HELPERS ----------
 function getIP(req) {
@@ -314,7 +315,7 @@ app.get('/', (req, res) => {
             <a href="/b" style="color:#0000EE;">/b/ - Random</a>
           </td>
           <td align="center">
-            <img src="/uploads/5board-logo.png" alt="5b0ard" style="max-width:320px; width:90%; margin-bottom:10px;" onerror="this.style.display='none'">
+            <img src="/public/5board-logo.png" alt="5b0ard" style="max-width:320px; width:90%; margin-bottom:10px;" onerror="this.style.display='none'">
 
             <hr width="80%">
             <h2 style="color:#800000; font-size:20px;">NOTICIAS / NEWS</h2>
