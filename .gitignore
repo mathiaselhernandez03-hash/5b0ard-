@@ -1,0 +1,5 @@
+node_modules/
+4chan_clon.db
+uploads/*
+!uploads/.gitkeep
+
