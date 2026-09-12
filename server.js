@@ -1,193 +1,513 @@
 const express = require('express');
-const Database = require('better-sqlite3');
+const { DatabaseSync } = require('node:sqlite');
 const multer = require('multer');
+const cookieParser = require('cookie-parser');
 const path = require('path');
-const fs = require('fs');
 
 const app = express();
-const db = new Database('foro.db');
-const PORT = process.env.PORT || 3000;
-const ADMIN_PASSWORD = 'admin123';
-const baneados = new Set();
+const PORT = 3000;
+
+// ---------- CONFIG DEL ADMIN PRINCIPAL ----------
+const ADMIN_USER = 'Just_Matt';
+const ADMIN_PASS = 'Matt5b0ard2026!'; // puedes cambiarla aquí cuando quieras
+
+// ---------- TABLONES DISPONIBLES ----------
+const BOARDS = {
+  b: 'Random',
+  v: 'Videojuegos y Fandoms'
+};
+
+const db = new DatabaseSync('./4chan_clon.db');
+
+db.exec(`CREATE TABLE IF NOT EXISTS hilos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    board TEXT DEFAULT 'b',
+    titulo TEXT,
+    comentario TEXT,
+    imagen TEXT,
+    autor TEXT DEFAULT 'Anónimo',
+    ip TEXT,
+    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS respuestas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    hilo_id INTEGER,
+    comentario TEXT,
+    imagen TEXT,
+    autor TEXT DEFAULT 'Anónimo',
+    ip TEXT,
+    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS moderadores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario TEXT UNIQUE,
+    clave TEXT
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS baneos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip TEXT,
+    razon TEXT,
+    baneado_por TEXT,
+    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS noticias (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    titulo TEXT,
+    contenido TEXT,
+    autor TEXT,
+    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+)`);
+
+// Migraciones por si la base ya existía sin estas columnas
+try { db.exec(`ALTER TABLE hilos ADD COLUMN autor TEXT DEFAULT 'Anónimo'`); } catch (e) {}
+try { db.exec(`ALTER TABLE hilos ADD COLUMN ip TEXT`); } catch (e) {}
+try { db.exec(`ALTER TABLE hilos ADD COLUMN board TEXT DEFAULT 'b'`); } catch (e) {}
+try { db.exec(`ALTER TABLE respuestas ADD COLUMN autor TEXT DEFAULT 'Anónimo'`); } catch (e) {}
+try { db.exec(`ALTER TABLE respuestas ADD COLUMN ip TEXT`); } catch (e) {}
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    if (!fs.existsSync('./uploads')) fs.mkdirSync('./uploads');
-    cb(null, './uploads');
-  },
-  filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
+  destination: 'uploads/',
+  filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname)
 });
 const upload = multer({ storage });
 
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static('public'));
+app.use(cookieParser());
 app.use('/uploads', express.static('uploads'));
+app.use('/public', express.static('public'));
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS hilos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    board TEXT, titulo TEXT, comentario TEXT, imagen TEXT, autor TEXT, ip TEXT,
-    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE IF NOT EXISTS respuestas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    hilo_id INTEGER, comentario TEXT, imagen TEXT, autor TEXT, ip TEXT,
-    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-`);
-
+// ---------- HELPERS ----------
 function getIP(req) {
-  return req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'desconocida';
+  return (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').replace('::ffff:', '');
 }
-function estaBaneado(req) {
-  return baneados.has(getIP(req));
+function esAdmin(req) {
+  return req.cookies && req.cookies.rol === 'admin';
+}
+function esMod(req) {
+  return req.cookies && (req.cookies.rol === 'admin' || req.cookies.rol === 'mod');
+}
+function nombreUsuario(req) {
+  if (esAdmin(req)) return ADMIN_USER;
+  if (req.cookies && req.cookies.rol === 'mod') return req.cookies.usuario;
+  return 'Anónimo';
+}
+function estaBaneado(ip) {
+  return db.prepare('SELECT * FROM baneos WHERE ip = ? ORDER BY id DESC LIMIT 1').get(ip);
 }
 
-app.get('/', (req, res) => {
-  res.send(`<!DOCTYPE html><html><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>5BOARD</title>
-<style>
-body{margin:0;font-family:sans-serif;background:#f5f0e6;color:#333}
-.container{display:flex;min-height:100vh}
-.sidebar{width:170px;background:#f8f4ec;padding:20px 12px;border-right:1px solid #ddd}
-.sidebar a{display:block;color:#0066cc;text-decoration:none;margin:8px 0;font-size:14px}
-.main{flex:1;padding:30px 15px;text-align:center}
-.news{background:#f8f0e0;border:1px solid #e0d5c0;padding:15px;margin:20px auto;max-width:480px;text-align:left;font-size:14px}
-.btn{display:inline-block;background:#8B0000;color:white;padding:10px 18px;text-decoration:none;border-radius:4px;margin-top:12px}
-h2{color:#8B0000;font-size:15px}
-</style></head><body>
-<div class="container">
-<div class="sidebar">
-<strong>Tablones</strong><br><br>
-<a href="/b/">/b/ - Random</a>
-<a href="/v/">/v/ - Videojuegos</a>
-<a href="/f/">/f/ - Fandoms</a><br>
-<a href="/faq">Reglas / FAQ</a>
-</div>
-<div class="main">
-<h1 style="color:#0066cc;margin:0">5BOARD</h1>
-<br><h2>NOTICIAS / NEWS</h2>
-<div class="news">
-<strong>ES:</strong> Aquí todo se vale. Socializa de lo que quieras. No te tomes nada en serio.<br><br>
-<strong>EN:</strong> Anything goes here. Don't take anything seriously.
-</div>
-<a href="/b/" class="btn">Entrar a /b/ - Random</a>
-</div></div></body></html>`);
-});
+// Middleware: bloquea publicar si la IP está baneada
+function bloquearBaneados(req, res, next) {
+  const ban = estaBaneado(getIP(req));
+  if (ban) {
+    return res.send(PaginaHTML(`
+      <div style="max-width:400px; margin:40px auto; background:#fdd; border:1px solid red; padding:20px; text-align:center;">
+        <h2 style="color:red; margin-top:0;">Estás baneado</h2>
+        <p><b>Razón:</b> ${ban.razon}</p>
+        <p style="font-size:12px; color:#666;">Fecha: ${ban.fecha}</p>
+      </div>
+    `, req));
+  }
+  next();
+}
 
+// ---------- PLANTILLA BASE ----------
+function PaginaHTML(contenido, req) {
+  const admin = esAdmin(req);
+  const mod = esMod(req);
+  let barra = `<a href="/login" style="color:#fff; text-decoration:none; float:right; font-size:12px;">Login</a>`;
+  if (admin) {
+    barra = `<span style="color:#ffd700; font-weight:bold; margin-left:15px;">👑 ${ADMIN_USER}</span>
+              <a href="/panel" style="color:#fff; margin-left:10px; font-size:12px;">Panel Admin</a>
+              <a href="/logout" style="color:#fff; margin-left:10px; font-size:12px;">(salir)</a>`;
+  } else if (mod) {
+    barra = `<span style="color:#87ceeb; font-weight:bold; margin-left:15px;">🛡️ ${nombreUsuario(req)}</span>
+              <a href="/logout" style="color:#fff; margin-left:10px; font-size:12px;">(salir)</a>`;
+  }
+
+  const listaTablones = Object.entries(BOARDS)
+    .map(([slug, nombre]) => `<a href="/${slug}" style="color:#fff; text-decoration:none; margin-right:10px;">/${slug}/ - ${nombre}</a>`)
+    .join('');
+
+  const linkFaq = `<a href="/faq" style="color:#fff; text-decoration:none; margin-right:10px;">FAQ / Reglas</a>`;
+
+  return `
+  <html>
+  <head><meta charset="utf-8"><title>5b0ard</title></head>
+  <body style="background:#fffff0; font-family:sans-serif;">
+    <div style="background:#1d2f6f; padding:8px 10px;">
+      <a href="/" style="color:#fff; text-decoration:none; font-weight:bold; margin-right:15px;">5b0ard</a>
+      ${listaTablones}
+      ${linkFaq}
+      ${barra}
+    </div>
+    ${contenido}
+  </body>
+  </html>`;
+}
+
+function botonBanear(ip, tipo, id, hiloId, board) {
+  if (!ip) return '';
+  const redirigirA = tipo === 'hilo' ? `/${board || 'b'}` : `/hilo/${hiloId}`;
+  return `
+    <form method="POST" action="/banear" style="display:inline;"
+      onsubmit="return this.razon.value.trim() !== '';">
+      <input type="hidden" name="ip" value="${ip}">
+      <input type="hidden" name="volver" value="${redirigirA}">
+      <input type="text" name="razon" placeholder="Razón del baneo" required
+        style="font-size:11px; width:110px;">
+      <button type="submit" style="font-size:11px; color:#fff; background:#800; border:none; cursor:pointer;">Banear</button>
+    </form>`;
+}
+
+// ---------- FAQ / REGLAS ----------
 app.get('/faq', (req, res) => {
-  res.send(`<!DOCTYPE html><html><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Reglas - 5BOARD</title>
-<style>
-body{font-family:sans-serif;background:#f5f0e6;color:#333;padding:20px;max-width:700px;margin:auto}
-h1{color:#8B0000} a{color:#0066cc}
-.regla{background:#fff;border:1px solid #ddd;padding:14px;margin:12px 0;border-left:5px solid #8B0000}
-</style></head><body>
-<h1>📜 Reglas del Foro</h1>
-<p><a href="/">← Volver al inicio</a></p>
-<div class="regla"><strong>1. Prohibido contenido ilegal</strong><br>
-Está totalmente prohibido subir o pedir material de abuso infantil (CP) o cualquier contenido ilegal. Quien lo haga será baneado permanentemente.</div>
-<div class="regla"><strong>2. Prohibido el gore extremo</strong><br>
-No se permite contenido gráfico de violencia real extrema, tortura o muerte real.</div>
-<div class="regla"><strong>3. Respeta a los demás</strong><br>
-No se permiten ataques personales graves, doxxing ni acoso.</div>
-<div class="regla"><strong>4. Usa el tablón correcto</strong><br>
-/b/ → Random<br>/v/ → Videojuegos<br>/f/ → Fandoms</div>
-<div class="regla"><strong>5. No spamear</strong><br>
-No publiques lo mismo muchas veces seguidas.</div>
-</body></html>`);
+  res.send(PaginaHTML(`
+    <div style="max-width:600px; margin:20px auto; padding:0 15px;">
+      <h2 style="color:#800000;">FAQ / Reglas — Rules</h2>
+
+      <div style="background:#f0e0d6; border:1px solid #ccc; padding:15px; margin-bottom:15px;">
+        <h3 style="margin-top:0; color:#800000;">ES: Reglas del sitio</h3>
+        <p>Este es un tablón anónimo donde todo se vale, con estas excepciones que no tienen negociación:</p>
+        <ul>
+          <li><b>Prohibido contenido de explotación infantil (CP)</b> en cualquier forma. Ban permanente e inmediato sin advertencia.</li>
+          <li><b>Prohibido contenido gore extremo / violencia gráfica real</b> (torturas, muertes reales, mutilación real, snuff). Ban permanente e inmediato.</li>
+          <li>Fuera de eso: puedes publicar lo que quieras, decir lo que quieras. No te tomes nada en serio.</li>
+        </ul>
+        <p>Los moderadores pueden borrar cualquier post y banear cualquier IP sin previo aviso si viola estas reglas.</p>
+      </div>
+
+      <div style="background:#f0e0d6; border:1px solid #ccc; padding:15px;">
+        <h3 style="margin-top:0; color:#800000;">EN: Site Rules</h3>
+        <p>This is an anonymous board where anything goes, with these non-negotiable exceptions:</p>
+        <ul>
+          <li><b>Child exploitation content (CP) is forbidden</b> in any form. Immediate, permanent ban.</li>
+          <li><b>Extreme gore / real graphic violence is forbidden</b> (real torture, real death, real mutilation, snuff). Immediate, permanent ban.</li>
+          <li>Outside of that: post whatever you want, say whatever you want. Don't take anything seriously.</li>
+        </ul>
+        <p>Moderators may delete any post and ban any IP without warning if these rules are broken.</p>
+      </div>
+    </div>
+  `, req));
 });
 
-function mostrarTablon(board, nombre, req, res) {
-  if (estaBaneado(req)) return res.send('Estás baneado.');
+// ---------- LOGIN (admin o mod) ----------
+app.get('/login', (req, res) => {
+  res.send(PaginaHTML(`
+    <div style="max-width:300px; margin:40px auto; background:#e0e0f0; padding:20px;">
+      <h2 style="text-align:center; margin-top:0;">Login</h2>
+      <form method="POST" action="/login">
+        <input type="text" name="usuario" placeholder="Usuario" style="width:100%; margin-bottom:8px; box-sizing:border-box;"><br>
+        <input type="password" name="clave" placeholder="Contraseña" style="width:100%; margin-bottom:8px; box-sizing:border-box;"><br>
+        <button type="submit" style="width:100%;">Entrar</button>
+      </form>
+    </div>
+  `, req));
+});
+
+app.post('/login', (req, res) => {
+  const { usuario, clave } = req.body;
+
+  if (usuario === ADMIN_USER && clave === ADMIN_PASS) {
+    res.cookie('rol', 'admin', { httpOnly: true, maxAge: 1000 * 60 * 60 * 24 * 30 });
+    res.cookie('usuario', ADMIN_USER, { httpOnly: true, maxAge: 1000 * 60 * 60 * 24 * 30 });
+    return res.redirect('/b');
+  }
+
+  const mod = db.prepare('SELECT * FROM moderadores WHERE usuario = ? AND clave = ?').get(usuario, clave);
+  if (mod) {
+    res.cookie('rol', 'mod', { httpOnly: true, maxAge: 1000 * 60 * 60 * 24 * 30 });
+    res.cookie('usuario', mod.usuario, { httpOnly: true, maxAge: 1000 * 60 * 60 * 24 * 30 });
+    return res.redirect('/b');
+  }
+
+  res.send(PaginaHTML('<p style="text-align:center; color:red;">Usuario o contraseña incorrectos. <a href="/login">Volver a intentar</a></p>', req));
+});
+
+app.get('/logout', (req, res) => {
+  res.clearCookie('rol');
+  res.clearCookie('usuario');
+  res.redirect('/b');
+});
+
+// ---------- PANEL ADMIN ----------
+app.get('/panel', (req, res) => {
+  if (!esAdmin(req)) return res.status(403).send('No autorizado.');
+
+  const mods = db.prepare('SELECT * FROM moderadores').all();
+  const baneos = db.prepare('SELECT * FROM baneos ORDER BY id DESC').all();
+
+  const modsHTML = mods.length
+    ? mods.map(m => `
+        <li>${m.usuario}
+          <form method="POST" action="/panel/quitar-mod/${m.id}" style="display:inline;" onsubmit="return confirm('¿Quitar a este moderador?');">
+            <button type="submit" style="font-size:11px; color:red;">Quitar</button>
+          </form>
+        </li>`).join('')
+    : '<li>No hay moderadores todavía.</li>';
+
+  const baneosHTML = baneos.length
+    ? baneos.map(b => `
+        <li>${b.ip} — <i>${b.razon}</i> (por ${b.baneado_por}, ${b.fecha})
+          <form method="POST" action="/panel/desbanear/${b.id}" style="display:inline;">
+            <button type="submit" style="font-size:11px;">Desbanear</button>
+          </form>
+        </li>`).join('')
+    : '<li>No hay baneos activos.</li>';
+
+  res.send(PaginaHTML(`
+    <div style="max-width:500px; margin:20px auto;">
+      <h2>Panel de Admin</h2>
+
+      <div style="background:#e0e0f0; padding:15px; margin-bottom:15px;">
+        <h3 style="margin-top:0;">Agregar Moderador</h3>
+        <form method="POST" action="/panel/agregar-mod">
+          <input type="text" name="usuario" placeholder="Usuario del mod" style="width:100%; margin-bottom:5px; box-sizing:border-box;"><br>
+          <input type="text" name="clave" placeholder="Contraseña del mod" style="width:100%; margin-bottom:5px; box-sizing:border-box;"><br>
+          <button type="submit" style="width:100%;">Agregar</button>
+        </form>
+        <h4>Moderadores actuales:</h4>
+        <ul>${modsHTML}</ul>
+      </div>
+
+      <div style="background:#e0e0f0; padding:15px; margin-bottom:15px;">
+        <h3 style="margin-top:0;">Publicar Noticia</h3>
+        <form method="POST" action="/panel/noticia">
+          <input type="text" name="titulo" placeholder="Título" style="width:100%; margin-bottom:5px; box-sizing:border-box;"><br>
+          <textarea name="contenido" placeholder="Contenido..." rows="4" style="width:100%; margin-bottom:5px; box-sizing:border-box;"></textarea><br>
+          <button type="submit" style="width:100%;">Publicar</button>
+        </form>
+      </div>
+
+      <div style="background:#e0e0f0; padding:15px;">
+        <h3 style="margin-top:0;">Baneos activos</h3>
+        <ul>${baneosHTML}</ul>
+      </div>
+    </div>
+  `, req));
+});
+
+app.post('/panel/agregar-mod', (req, res) => {
+  if (!esAdmin(req)) return res.status(403).send('No autorizado.');
+  try {
+    db.prepare('INSERT INTO moderadores (usuario, clave) VALUES (?, ?)').run(req.body.usuario, req.body.clave);
+  } catch (e) {}
+  res.redirect('/panel');
+});
+
+app.post('/panel/quitar-mod/:id', (req, res) => {
+  if (!esAdmin(req)) return res.status(403).send('No autorizado.');
+  db.prepare('DELETE FROM moderadores WHERE id = ?').run(req.params.id);
+  res.redirect('/panel');
+});
+
+app.post('/panel/noticia', (req, res) => {
+  if (!esAdmin(req)) return res.status(403).send('No autorizado.');
+  db.prepare('INSERT INTO noticias (titulo, contenido, autor) VALUES (?, ?, ?)')
+    .run(req.body.titulo, req.body.contenido, ADMIN_USER);
+  res.redirect('/panel');
+});
+
+app.post('/panel/desbanear/:id', (req, res) => {
+  if (!esAdmin(req)) return res.status(403).send('No autorizado.');
+  db.prepare('DELETE FROM baneos WHERE id = ?').run(req.params.id);
+  res.redirect('/panel');
+});
+
+// ---------- BANEAR (admin o mod) ----------
+app.post('/banear', (req, res) => {
+  if (!esMod(req)) return res.status(403).send('No autorizado.');
+  const { ip, razon, volver } = req.body;
+  db.prepare('INSERT INTO baneos (ip, razon, baneado_por) VALUES (?, ?, ?)')
+    .run(ip, razon, nombreUsuario(req));
+  res.redirect(volver || '/b');
+});
+
+// ---------- BORRAR HILO / RESPUESTA (admin o mod) ----------
+app.post('/borrar-hilo/:id', (req, res) => {
+  if (!esMod(req)) return res.status(403).send('No autorizado.');
+  const hilo = db.prepare('SELECT board FROM hilos WHERE id = ?').get(req.params.id);
+  db.prepare('DELETE FROM respuestas WHERE hilo_id = ?').run(req.params.id);
+  db.prepare('DELETE FROM hilos WHERE id = ?').run(req.params.id);
+  res.redirect('/' + (hilo ? hilo.board : 'b'));
+});
+
+app.post('/borrar-respuesta/:id/:hiloId', (req, res) => {
+  if (!esMod(req)) return res.status(403).send('No autorizado.');
+  db.prepare('DELETE FROM respuestas WHERE id = ?').run(req.params.id);
+  res.redirect('/hilo/' + req.params.hiloId);
+});
+
+// ---------- PÁGINA DE BIENVENIDA ----------
+app.get('/', (req, res) => {
+  const noticias = db.prepare('SELECT * FROM noticias ORDER BY id DESC LIMIT 5').all();
+  const noticiasHTML = noticias.length
+    ? noticias.map(n => `
+        <div style="border-bottom:1px solid #ddd; padding:8px 0;">
+          <b>${n.titulo}</b> <span style="font-size:11px; color:#888;">— ${n.autor}, ${n.fecha}</span>
+          <p style="margin:4px 0 0 0;">${n.contenido}</p>
+        </div>`).join('')
+    : `<p><b>ES:</b> Aquí todo se vale. Socializa de lo que quieras, di lo que quieras.
+       No te tomes nada en serio — si lo haces, eres un imbécil.<br><br>
+       <b>EN:</b> Anything goes here. Talk about whatever you want, say whatever you want.
+       Don't take anything seriously — if you do, you're an idiot.</p>`;
+
+  res.send(`
+    <html>
+    <head><meta charset="utf-8"><title>5b0ard</title></head>
+    <body style="background:#ffffee; font-family:'Times New Roman', serif; color:#000; margin:0; padding:0;">
+      <table width="100%" cellpadding="10" cellspacing="0">
+        <tr valign="top">
+          <td width="160" style="border-right:1px solid #ccc; font-size:13px;">
+            <b>Tablones</b><br><br>
+            ${Object.entries(BOARDS).map(([slug, nombre]) => `<a href="/${slug}" style="color:#0000EE; display:block; margin-bottom:4px;">/${slug}/ - ${nombre}</a>`).join('')}
+          </td>
+          <td align="center">
+            <img src="/public/5board-logo.png" alt="5b0ard" style="max-width:320px; width:90%; margin-bottom:10px;" onerror="this.style.display='none'">
+
+            <hr width="80%">
+            <h2 style="color:#800000; font-size:20px;">NOTICIAS / NEWS</h2>
+
+            <table width="80%" cellpadding="8" style="border:1px solid #ccc; background:#f0e0d6; text-align:left; font-size:14px;">
+              <tr><td>${noticiasHTML}</td></tr>
+            </table>
+
+            <br>
+            <a href="/b" style="display:inline-block; background:#800000; color:#fff; text-decoration:none; padding:8px 18px; font-family:sans-serif; font-size:14px;">
+              Entrar a /b/ - Random
+            </a>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+  `);
+});
+
+// ---------- TABLÓN (cualquiera de BOARDS) ----------
+app.get('/:board', (req, res, next) => {
+  const board = req.params.board;
+  if (!BOARDS[board]) return next(); // no es un tablón válido, sigue a 404
+
+  const mod = esMod(req);
   const hilos = db.prepare('SELECT * FROM hilos WHERE board = ? ORDER BY id DESC').all(board);
-  let html = '';
-  if (hilos.length === 0) html = '<p style="color:#666">No hay hilos todavía.</p>';
-  else hilos.forEach(h => {
-    const img = h.imagen ? `<br><img src="/uploads/${h.imagen}" style="max-width:180px;margin-top:6px">` : '';
-    html += `<div style="background:#fff;border:1px solid #ddd;padding:12px;margin:10px 0;border-radius:4px">
-      <strong>#\( {h.id}</strong> - <a href="/hilo/ \){h.id}">${h.titulo || '(Sin título)'}</a><br>
-      <small style="color:#777">${h.autor || 'Anónimo'} • ${h.fecha}</small>
-      <p>\( {h.comentario || ''}</p> \){img}</div>`;
-  });
-  res.send(`<!DOCTYPE html><html><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>/${board}/ - ${nombre}</title>
-<style>
-body{font-family:sans-serif;background:#f5f0e6;color:#333;margin:0;padding:15px}
-a{color:#0066cc} input,textarea,button{width:100%;padding:10px;margin:6px 0;box-sizing:border-box;border:1px solid #ccc;border-radius:4px}
-button{background:#8B0000;color:#fff;border:none;font-weight:bold}
-.formu{background:#fff;padding:15px;border:1px solid #ddd;border-radius:6px;margin-bottom:20px}
-</style></head><body>
-<p><a href="/">← Inicio</a> | <a href="/faq">Reglas</a></p>
-<h2>/${board}/ - ${nombre}</h2>
-<div class="formu"><h3>Crear nuevo hilo</h3>
-<form action="/crear-hilo" method="POST" enctype="multipart/form-data">
-<input type="hidden" name="board" value="${board}">
-<input type="text" name="titulo" placeholder="Título (opcional)">
-<textarea name="comentario" rows="4" placeholder="Escribe tu mensaje..." required></textarea>
-<input type="file" name="imagen" accept="image/*">
-<button type="submit">Publicar hilo</button></form></div>
-<h3>Hilos</h3>${html}</body></html>`);
-}
 
-app.get('/b/', (req, res) => mostrarTablon('b', 'Random', req, res));
-app.get('/v/', (req, res) => mostrarTablon('v', 'Videojuegos', req, res));
-app.get('/f/', (req, res) => mostrarTablon('f', 'Fandoms', req, res));
+  let hilosHTML = '';
+  if (hilos.length === 0) {
+    hilosHTML = '<p style="color:red; text-align:center;">No hay hilos activos. ¡Sé el primero!</p>';
+  } else {
+    hilos.forEach(h => {
+      const esAutorAdmin = h.autor === ADMIN_USER;
+      const nombreMostrado = esAutorAdmin
+        ? `<span style="color:#b8860b; font-weight:bold;">👑 ${h.autor}</span>`
+        : (h.autor && h.autor !== 'Anónimo' ? `<span style="color:#4682b4; font-weight:bold;">🛡️ ${h.autor}</span>` : 'Anónimo');
+      const botonBorrar = mod
+        ? `<form method="POST" action="/borrar-hilo/${h.id}" style="display:inline;" onsubmit="return confirm('¿Borrar este hilo?');">
+             <button type="submit" style="font-size:11px; color:red; background:none; border:1px solid red; cursor:pointer;">Borrar</button>
+           </form> ${botonBanear(h.ip, 'hilo', h.id, null, board)}`
+        : '';
+      hilosHTML += `
+      <div style="border:1px solid #ccc; margin:10px 0; padding:10px; background:#f0e0d6;">
+        <span class="meta">${nombreMostrado} ${h.titulo ? '- ' + h.titulo : ''} (${h.fecha || ''}) <span class="num">No. ${h.id}</span> ${mod ? `<span style="font-size:10px; color:#888;">[IP: ${h.ip || 'desconocida'}]</span>` : ''}<br>${botonBorrar}</span><br><br>
+        ${h.imagen ? `<a href="/uploads/${h.imagen}" target="_blank"><img src="/uploads/${h.imagen}" style="max-width:200px; float:left; margin-right:10px;"></a>` : ''}
+        <p>${h.comentario}</p>
+        <div style="clear:both;"></div>
+        <a href="/hilo/${h.id}" style="font-size:13px;">Ver hilo / responder</a>
+      </div>`;
+    });
+  }
 
-app.post('/crear-hilo', upload.single('imagen'), (req, res) => {
-  if (estaBaneado(req)) return res.send('Estás baneado.');
-  const { board, titulo, comentario } = req.body;
-  const imagen = req.file ? req.file.filename : null;
-  db.prepare('INSERT INTO hilos (board, titulo, comentario, imagen, autor, ip) VALUES (?,?,?,?,?,?)')
-    .run(board, titulo || null, comentario, imagen, 'Anónimo', getIP(req));
-  res.redirect('/' + board + '/');
+  const formulario = `
+    <div style="max-width:400px; margin:20px auto; background:#e0e0f0; padding:15px;">
+      <h2 style="text-align:center; background:#f0d6d0; padding:10px; margin-top:0;">/${board}/ - ${BOARDS[board]}</h2>
+      <form method="POST" action="/crear-hilo" enctype="multipart/form-data">
+        <input type="hidden" name="board" value="${board}">
+        <input type="text" name="titulo" placeholder="Título (Opcional)" style="width:100%; margin-bottom:5px; box-sizing:border-box;"><br>
+        <textarea name="comentario" placeholder="Comentario..." rows="5" style="width:100%; margin-bottom:5px; box-sizing:border-box;"></textarea><br>
+        <input type="file" name="imagen"><br><br>
+        <button type="submit" style="width:100%;">Publicar Hilo</button>
+      </form>
+    </div>
+    <div style="max-width:500px; margin:0 auto;">${hilosHTML}</div>
+  `;
+
+  res.send(PaginaHTML(formulario, req));
 });
 
+// ---------- CREAR HILO ----------
+app.post('/crear-hilo', bloquearBaneados, upload.single('imagen'), (req, res) => {
+  if (!req.file) return res.send('Error: Es obligatorio subir una imagen.');
+  const autor = nombreUsuario(req);
+  const board = BOARDS[req.body.board] ? req.body.board : 'b';
+  db.prepare(`INSERT INTO hilos (board, titulo, comentario, imagen, autor, ip) VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(board, req.body.titulo, req.body.comentario, req.file.filename, autor, getIP(req));
+  res.redirect('/' + board);
+});
+
+// ---------- VER UN HILO Y SUS RESPUESTAS ----------
 app.get('/hilo/:id', (req, res) => {
+  const mod = esMod(req);
   const hilo = db.prepare('SELECT * FROM hilos WHERE id = ?').get(req.params.id);
-  if (!hilo) return res.send('Hilo no encontrado');
-  const respuestas = db.prepare('SELECT * FROM respuestas WHERE hilo_id = ? ORDER BY id ASC').all(req.params.id);
-  let respHTML = '';
-  respuestas.forEach(r => {
-    const img = r.imagen ? `<br><img src="/uploads/${r.imagen}" style="max-width:160px">` : '';
-    respHTML += `<div style="background:#fff;border:1px solid #ddd;padding:10px;margin:8px 0;border-radius:4px">
-      <small style="color:#777">#${r.id} • ${r.autor || 'Anónimo'} • ${r.fecha}</small>
-      <p>\( {r.comentario}</p> \){img}</div>`;
+  if (!hilo) return res.send('Hilo no encontrado.');
+
+  const resps = db.prepare('SELECT * FROM respuestas WHERE hilo_id = ? ORDER BY id ASC').all(req.params.id);
+
+  const nombreHilo = hilo.autor === ADMIN_USER
+    ? `<span style="color:#b8860b; font-weight:bold;">👑 ${hilo.autor}</span>`
+    : (hilo.autor && hilo.autor !== 'Anónimo' ? `<span style="color:#4682b4; font-weight:bold;">🛡️ ${hilo.autor}</span>` : 'Anónimo');
+  const botonBorrarHilo = mod
+    ? `<form method="POST" action="/borrar-hilo/${hilo.id}" style="display:inline;" onsubmit="return confirm('¿Borrar este hilo?');">
+         <button type="submit" style="font-size:11px; color:red; background:none; border:1px solid red; cursor:pointer;">Borrar hilo</button>
+       </form> ${botonBanear(hilo.ip, 'hilo', hilo.id, null, hilo.board)}`
+    : '';
+
+  let hiloHTML = `
+    <div style="max-width:500px; margin:20px auto;">
+      <div class="hilo" style="border:1px solid #ccc; margin:10px 0; padding:10px; background:#f0e0d6;">
+        <span class="meta">${nombreHilo} ${hilo.titulo ? '- ' + hilo.titulo : ''} (${hilo.fecha || ''}) <span class="num">No. ${hilo.id}</span> ${mod ? `<span style="font-size:10px; color:#888;">[IP: ${hilo.ip || 'desconocida'}]</span>` : ''}<br>${botonBorrarHilo}</span><br><br>
+        ${hilo.imagen ? `<a href="/uploads/${hilo.imagen}" target="_blank"><img src="/uploads/${hilo.imagen}" style="max-width:200px; float:left; margin-right:10px;"></a>` : ''}
+        <p>${hilo.comentario}</p>
+        <div style="clear:both;"></div>
+      </div>`;
+
+  resps.forEach(r => {
+    const nombreResp = r.autor === ADMIN_USER
+      ? `<span style="color:#b8860b; font-weight:bold;">👑 ${r.autor}</span>`
+      : (r.autor && r.autor !== 'Anónimo' ? `<span style="color:#4682b4; font-weight:bold;">🛡️ ${r.autor}</span>` : 'Anónimo');
+    const botonBorrarResp = mod
+      ? `<form method="POST" action="/borrar-respuesta/${r.id}/${hilo.id}" style="display:inline;" onsubmit="return confirm('¿Borrar esta respuesta?');">
+           <button type="submit" style="font-size:11px; color:red; background:none; border:1px solid red; cursor:pointer;">Borrar</button>
+         </form> ${botonBanear(r.ip, 'respuesta', r.id, hilo.id)}`
+      : '';
+    hiloHTML += `
+      <div class="respuesta" style="border:1px solid #ddd; margin:8px 0 8px 20px; padding:10px; background:#f9f9f9;">
+        <span class="meta">${nombreResp} (${r.fecha || ''}) <span class="num">No. ${r.id}</span> ${mod ? `<span style="font-size:10px; color:#888;">[IP: ${r.ip || 'desconocida'}]</span>` : ''}<br>${botonBorrarResp}</span><br><br>
+        ${r.imagen ? `<a href="/uploads/${r.imagen}" target="_blank"><img src="/uploads/${r.imagen}" style="max-width:150px; float:left; margin-right:10px;"></a>` : ''}
+        <p>${r.comentario}</p>
+        <div style="clear:both;"></div>
+      </div>`;
   });
-  const imgHilo = hilo.imagen ? `<br><img src="/uploads/${hilo.imagen}" style="max-width:220px">` : '';
-  res.send(`<!DOCTYPE html><html><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hilo #${hilo.id}</title>
-<style>
-body{font-family:sans-serif;background:#f5f0e6;color:#333;margin:0;padding:15px}
-a{color:#0066cc} textarea,button,input{width:100%;padding:10px;margin:6px 0;box-sizing:border-box}
-button{background:#8B0000;color:#fff;border:none;border-radius:4px}
-</style></head><body>
-<p><a href="/\( {hilo.board}/">← Volver a / \){hilo.board}/</a></p>
-<div style="background:#fff;border:1px solid #ddd;padding:15px;border-radius:6px">
-<h2>${hilo.titulo || '(Sin título)'}</h2>
-<small style="color:#777">#${hilo.id} • ${hilo.autor || 'Anónimo'} • ${hilo.fecha}</small>
-<p>\( {hilo.comentario || ''}</p> \){imgHilo}</div>
-<h3>Respuestas</h3>${respHTML || '<p style="color:#666">Nadie ha respondido aún</p>'}
-<div style="background:#fff;border:1px solid #ddd;padding:15px;border-radius:6px;margin-top:20px">
-<h3>Responder</h3>
-<form action="/responder/${hilo.id}" method="POST" enctype="multipart/form-data">
-<textarea name="comentario" rows="3" placeholder="Tu respuesta..." required></textarea>
-<input type="file" name="imagen" accept="image/*">
-<button type="submit">Enviar respuesta</button></form></div>
-</body></html>`);
+
+  hiloHTML += `
+      <div style="background:#e0e0f0; padding:15px; margin-top:10px;">
+        <form method="POST" action="/responder/${hilo.id}" enctype="multipart/form-data">
+          <textarea name="comentario" placeholder="Comentario..." rows="4" style="width:100%; margin-bottom:5px; box-sizing:border-box;"></textarea><br>
+          <input type="file" name="imagen"><br><br>
+          <button type="submit" style="width:100%;">Responder</button>
+        </form>
+      </div>
+    </div>`;
+
+  res.send(PaginaHTML(hiloHTML, req));
 });
 
-app.post('/responder/:id', upload.single('imagen'), (req, res) => {
-  if (estaBaneado(req)) return res.send('Estás baneado.');
-  const imagen = req.file ? req.file.filename : null;
-  db.prepare('INSERT INTO respuestas (hilo_id, comentario, imagen, autor, ip) VALUES (?,?,?,?,?)')
-    .run(req.params.id, req.body.comentario, imagen, 'Anónimo', getIP(req));
+// ---------- RESPONDER A UN HILO ----------
+app.post('/responder/:id', bloquearBaneados, upload.single('imagen'), (req, res) => {
+  const imagenNom = req.file ? req.file.filename : null;
+  const autor = nombreUsuario(req);
+  db.prepare(`INSERT INTO respuestas (hilo_id, comentario, imagen, autor, ip) VALUES (?, ?, ?, ?, ?)`)
+    .run(req.params.id, req.body.comentario, imagenNom, autor, getIP(req));
   res.redirect('/hilo/' + req.params.id);
 });
 
-app.listen(PORT, () => console.log('Foro corriendo en http://localhost:' + PORT));
+app.listen(PORT, () => console.log(`Foro corriendo en http://localhost:${PORT}`));
 
