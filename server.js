@@ -11,6 +11,11 @@ const PORT = 3000;
 const ADMIN_USER = 'Just_Matt';
 const ADMIN_PASS = 'Matt5b0ard2026!'; // puedes cambiarla aquí cuando quieras
 
+const BOARDS = {
+  b: 'Random',
+  v: 'Videojuegos y Fandoms'
+};
+
 const db = new DatabaseSync('./4chan_clon.db');
 
 db.exec(`CREATE TABLE IF NOT EXISTS hilos (
@@ -54,6 +59,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS noticias (
 // Migraciones por si la base ya existía sin estas columnas
 try { db.exec(`ALTER TABLE hilos ADD COLUMN autor TEXT DEFAULT 'Anónimo'`); } catch (e) {}
 try { db.exec(`ALTER TABLE hilos ADD COLUMN ip TEXT`); } catch (e) {}
+try { db.exec(`ALTER TABLE hilos ADD COLUMN board TEXT DEFAULT 'b'`); } catch (e) {}
 try { db.exec(`ALTER TABLE respuestas ADD COLUMN autor TEXT DEFAULT 'Anónimo'`); } catch (e) {}
 try { db.exec(`ALTER TABLE respuestas ADD COLUMN ip TEXT`); } catch (e) {}
 
@@ -122,7 +128,8 @@ function PaginaHTML(contenido, req) {
   <body style="background:#fffff0; font-family:sans-serif;">
     <div style="background:#1d2f6f; padding:8px 10px;">
       <a href="/" style="color:#fff; text-decoration:none; font-weight:bold; margin-right:15px;">5b0ard</a>
-      <a href="/b" style="color:#fff; text-decoration:none;">/b/ - Random</a>
+      ${Object.keys(BOARDS).map(sl => `<a href="/${sl}" style="color:#fff; text-decoration:none; margin-right:10px;">/${sl}/ - ${BOARDS[sl]}</a>`).join("")}
+      <a href="/faq" style="color:#fff; text-decoration:none; margin-right:10px;">FAQ / Reglas</a>
       ${barra}
     </div>
     ${contenido}
@@ -130,9 +137,9 @@ function PaginaHTML(contenido, req) {
   </html>`;
 }
 
-function botonBanear(ip, tipo, id, hiloId) {
+function botonBanear(ip, tipo, id, hiloId, board) {
   if (!ip) return '';
-  const redirigirA = tipo === 'hilo' ? `/b` : `/hilo/${hiloId}`;
+  const redirigirA = tipo === 'hilo' ? `/${board || 'b'}` : `/hilo/${hiloId}`;
   return `
     <form method="POST" action="/banear" style="display:inline;"
       onsubmit="return this.razon.value.trim() !== '';">
@@ -279,9 +286,10 @@ app.post('/banear', (req, res) => {
 // ---------- BORRAR HILO / RESPUESTA (admin o mod) ----------
 app.post('/borrar-hilo/:id', (req, res) => {
   if (!esMod(req)) return res.status(403).send('No autorizado.');
+  const hiloBorrado = db.prepare('SELECT board FROM hilos WHERE id = ?').get(req.params.id);
   db.prepare('DELETE FROM respuestas WHERE hilo_id = ?').run(req.params.id);
   db.prepare('DELETE FROM hilos WHERE id = ?').run(req.params.id);
-  res.redirect('/b');
+  res.redirect('/' + (hiloBorrado ? hiloBorrado.board : 'b'));
 });
 
 app.post('/borrar-respuesta/:id/:hiloId', (req, res) => {
@@ -312,7 +320,7 @@ app.get('/', (req, res) => {
         <tr valign="top">
           <td width="160" style="border-right:1px solid #ccc; font-size:13px;">
             <b>Tablones</b><br><br>
-            <a href="/b" style="color:#0000EE;">/b/ - Random</a>
+            ${Object.keys(BOARDS).map(sl => `<a href="/${sl}" style="color:#0000EE; display:block; margin-bottom:4px;">/${sl}/ - ${BOARDS[sl]}</a>`).join("")}
           </td>
           <td align="center">
             <img src="/public/5board-logo.png" alt="5b0ard" style="max-width:320px; width:90%; margin-bottom:10px;" onerror="this.style.display='none'">
@@ -405,7 +413,7 @@ app.get('/hilo/:id', (req, res) => {
   const botonBorrarHilo = mod
     ? `<form method="POST" action="/borrar-hilo/${hilo.id}" style="display:inline;" onsubmit="return confirm('¿Borrar este hilo?');">
          <button type="submit" style="font-size:11px; color:red; background:none; border:1px solid red; cursor:pointer;">Borrar hilo</button>
-       </form> ${botonBanear(hilo.ip, 'hilo', hilo.id)}`
+       </form> ${botonBanear(hilo.ip, 'hilo', hilo.id, null, hilo.board)}`
     : '';
 
   let hiloHTML = `
